@@ -28,6 +28,7 @@ type Identifier struct {
 
 // Ledger represents a block or a ledger on a blockchain.
 type Ledger struct {
+	ID string
 	// Blockchain this ledger is part of
 	Blockchain Blockchain
 	// Blockchain network this ledger is a part of
@@ -39,7 +40,10 @@ type Ledger struct {
 	// Indicates whether this block is orphaned or not (default = false)
 	Orphaned bool
 	// Timestamp of when this ledger was created, as reported by the blockchain
-	Timestamp time.Time
+	Timestamp     time.Time
+	Metadata      interface{}
+	CreatedAt     time.Time
+	LastUpdatedAt time.Time
 	// Transactions of the ledger
 	Transactions []Transaction
 }

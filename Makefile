@@ -17,7 +17,7 @@ ifeq (, $(shell which goose))
 endif
 
 # Database
-
+POSTGRES_URI = "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}/${POSTGRES_DB}"
 .PHONY: migrate
 migrate:
 	goose -dir sql/migrations/ postgres ${POSTGRES_URI} up

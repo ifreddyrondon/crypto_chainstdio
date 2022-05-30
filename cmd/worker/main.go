@@ -8,7 +8,8 @@ import (
 	"github.com/caarlos0/env/v6"
 	"github.com/jackc/pgx/v4/pgxpool"
 
-	"github.com/ifreddyrondon/crypto_chainstdio/internal/sequencer"
+	"github.com/ifreddyrondon/crypto_chainstdio/internal/store"
+	"github.com/ifreddyrondon/crypto_chainstdio/internal/worker"
 	"github.com/ifreddyrondon/crypto_chainstdio/pkg"
 	"github.com/ifreddyrondon/crypto_chainstdio/pkg/blockchain"
 	"github.com/ifreddyrondon/crypto_chainstdio/pkg/manager"
@@ -47,12 +48,19 @@ func run() error {
 	}
 	_ = dbpool
 
-	// ethereum client
-	ethClient := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET)
+	// ethereum
+	ethFetcher := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET)
+	ledgerStore := store.NewLedger(dbpool, store.Params{
+		Blockchain: pkg.Blockchain_ETHEREUM,
+		Network:    pkg.Network_ETHEREUM_MAINNET,
+	})
+
+	// worker
+	reconciler := worker.NewReconciler(&ethFetcher, ledgerStore)
+	wkr := worker.New(&ethFetcher, reconciler)
 
 	mgr := manager.New()
-	seq := sequencer.New(ethClient)
-	mgr.AddService(manager.ServiceFactory("sequencer", seq.Run))
+	mgr.AddService(manager.ServiceFactory("worker", wkr.Run))
 
 	mgr.WaitForInterrupt()
 	return nil

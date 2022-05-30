@@ -23,6 +23,9 @@ const (
 	ethGetBlockByHashMethod ethereumRequestMethod = "eth_getBlockByHash"
 	// JSON RPC method to get an ethereum block by its number
 	ethGetBlockByNumberMethod ethereumRequestMethod = "eth_getBlockByNumber"
+
+	// JSON RPC method to get number of block tip
+	ethGetChainStatsMethods ethereumRequestMethod = "eth_blockNumber"
 )
 
 // EthereumBlock is an ethereum block
@@ -114,6 +117,37 @@ func NewEthereum(nodesURL string, network pkg.Network) Ethereum {
 		nodesURL: nodesURL,
 		network:  network,
 	}
+}
+
+// Latest fetches the tip block
+func (e Ethereum) Latest(ctx context.Context) (pkg.Ledger, error) {
+	jsonreq := jsonrpc.Request{
+		Method: string(ethGetChainStatsMethods),
+		Params: []interface{}{},
+	}
+
+	var l pkg.Ledger
+	req, err := jsonrpc.NewRequest(ctx, e.nodesURL, jsonreq)
+	if err != nil {
+		return l, fmt.Errorf("failed to create request: %w", err)
+	}
+	var resp jsonrpc.Response
+	if err := e.do(req, &resp); err != nil {
+		return pkg.Ledger{}, fmt.Errorf("error fetching latest block number: %w", err)
+	}
+	var hex string
+	if err := json.Unmarshal(resp.Result, &hex); err != nil {
+		return l, fmt.Errorf("error unmarshaling latest block number %s: %w", string(resp.Result), err)
+	}
+	cleanedResult, err := CleanHexString(hex)
+	if err != nil {
+		return l, fmt.Errorf("error cleaning hex block number %s. err: %w", hex, err)
+	}
+	height, err := hexutil.DecodeUint64(cleanedResult)
+	if err != nil {
+		return l, fmt.Errorf("error decoding block number hex %s. err: %w", cleanedResult, err)
+	}
+	return e.Ledger(ctx, pkg.Identifier{Index: height})
 }
 
 // Ledger fetches a ledger (block) by hash or by index
