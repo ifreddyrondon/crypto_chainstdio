@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/ifreddyrondon/crypto_chainstdio/internal/store"
@@ -18,7 +17,7 @@ type (
 	}
 	LedgerStore interface {
 		Latest(ctx context.Context) (pkg.Ledger, error)
-		Save(ctx context.Context, l pkg.Ledger) (pkg.Ledger, error)
+		Save(ctx context.Context, l ...pkg.Ledger) error
 	}
 )
 
@@ -50,24 +49,21 @@ func (s Synchronizer) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		latestLedgerStored, err = s.ledgerStore.Save(ctx, l)
-		if err != nil {
+		if err = s.ledgerStore.Save(ctx, l); err != nil {
 			return fmt.Errorf("error saving genesis ledger: %w", err)
 		}
+		latestLedgerStored = l
 	}
 	// latest ledger on chain
 	latestLedgerChain, err := s.fetcher.Latest(ctx)
-	chunks := split(latestLedgerStored.Identifier.Index+1, latestLedgerChain.Identifier.Index, 5)
+	chunks := split(latestLedgerStored.Identifier.Index+1, latestLedgerChain.Identifier.Index, 500)
 	for _, chunk := range chunks {
-		log.Printf("syncing ledgers from %v to %v\n", chunk[0].Index, chunk[len(chunk)-1].Index)
 		ledgers, err := s.poller(ctx, chunk)
 		if err != nil {
 			return err
 		}
-		for _, l := range ledgers {
-			if _, err := s.ledgerStore.Save(ctx, l); err != nil {
-				return err
-			}
+		if err := s.ledgerStore.Save(ctx, ledgers...); err != nil {
+			return err
 		}
 	}
 	return nil

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/jackc/pgx/v4"
@@ -15,6 +16,18 @@ import (
 var ErrNotFoundLedgers = errors.New("not found ledgers")
 
 var (
+	ledgerTableID         = pgx.Identifier{"ledgers"}
+	ledgerTableInsertCols = []string{
+		"blockchain",
+		"network",
+		"identifier_hash",
+		"identifier_index",
+		"previous_ledger_hash",
+		"previous_ledger_index",
+		"orphaned",
+		"timestamp",
+		"metadata",
+	}
 	transactionsTableID = pgx.Identifier{"transactions"}
 	txsTableInsertCols  = []string{
 		"blockchain",
@@ -91,53 +104,43 @@ func (s Ledger) Latest(ctx context.Context) (pkg.Ledger, error) {
 	return ledger, nil
 }
 
-const saveLedgerQry = `
-INSERT INTO ledgers(blockchain, network,
-                    identifier_hash, identifier_index,
-                    previous_ledger_hash, previous_ledger_index,
-                    orphaned, timestamp, metadata)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id, created_at, updated_at;
-`
-
-func (s Ledger) Save(ctx context.Context, l pkg.Ledger) (pkg.Ledger, error) {
-	row := s.pool.QueryRow(
-		ctx, saveLedgerQry,
-		s.blockchain,
-		s.network,
-		l.Identifier.Hash,
-		l.Identifier.Index,
-		l.PreviousLedger.Hash,
-		l.PreviousLedger.Index,
-		l.Orphaned,
-		l.Timestamp,
-		l.Metadata,
-	)
-
-	var id string
-	var createdAt time.Time
-	var lastUpdatedAt time.Time
-	if err := row.Scan(&id, &createdAt, &lastUpdatedAt); err != nil {
-		return l, errors.Wrap(err, "error inserting ledger")
+func (s Ledger) Save(ctx context.Context, l ...pkg.Ledger) error {
+	if len(l) == 0 {
+		return nil
 	}
-	l.ID = id
-	l.CreatedAt = createdAt
-	l.LastUpdatedAt = lastUpdatedAt
-
-	if len(l.Transactions) == 0 {
-		return l, nil
-	}
-
-	cpSrcFn := pgx.CopyFromSlice(len(l.Transactions), func(i int) ([]interface{}, error) {
+	t0 := time.Now()
+	var txs []pkg.Transaction
+	ledgerSrcFn := pgx.CopyFromSlice(len(l), func(i int) ([]interface{}, error) {
+		txs = append(txs, l[i].Transactions...)
 		return []interface{}{
 			s.blockchain,
 			s.network,
-			l.Transactions[i].Identifier.Hash,
-			l.Transactions[i].Identifier.Index,
-			l.Transactions[i].Ledger.Hash,
-			l.Transactions[i].Ledger.Index,
-			l.Transactions[i].From.Hash,
-			l.Transactions[i].To.Hash,
+			l[i].Identifier.Hash,
+			l[i].Identifier.Index,
+			l[i].PreviousLedger.Hash,
+			l[i].PreviousLedger.Index,
+			l[i].Orphaned,
+			l[i].Timestamp,
+			l[i].Metadata,
+		}, nil
+	})
+	if _, err := s.pool.CopyFrom(ctx, ledgerTableID, ledgerTableInsertCols, ledgerSrcFn); err != nil {
+		return errors.Wrap(err, "error bulk saving ledgers")
+	}
+
+	if len(txs) == 0 {
+		return nil
+	}
+	cpSrcFn := pgx.CopyFromSlice(len(txs), func(i int) ([]interface{}, error) {
+		return []interface{}{
+			s.blockchain,
+			s.network,
+			txs[i].Identifier.Hash,
+			txs[i].Identifier.Index,
+			txs[i].Ledger.Hash,
+			txs[i].Ledger.Index,
+			txs[i].From.Hash,
+			txs[i].To.Hash,
 			nil, nil,
 			nil,
 			nil,
@@ -145,31 +148,9 @@ func (s Ledger) Save(ctx context.Context, l pkg.Ledger) (pkg.Ledger, error) {
 		}, nil
 	})
 	if _, err := s.pool.CopyFrom(ctx, transactionsTableID, txsTableInsertCols, cpSrcFn); err != nil {
-		return l, errors.Wrap(err, "error batch save transactions")
+		return errors.Wrap(err, "error bulk saving transactions")
 	}
-
-	// batch := pgx.Batch{}
-	// for _, b := range txs {
-	// 	batch.Queue(saveTxQry,
-	// 		t.blockchain,
-	// 		t.network,
-	// 		b.Identifier.Hash,
-	// 		b.Identifier.Index,
-	// 		b.Ledger.Hash,
-	// 		b.Ledger.Index,
-	// 		b.From.Hash,
-	// 		b.To.Hash,
-	// 		nil, nil,
-	// 		nil,
-	// 		nil,
-	// 		nil,
-	// 	)
-	// }
-	// batchRes := t.pool.SendBatch(ctx, &batch)
-	// if _, err := batchRes.Exec(); err != nil {
-	// 	return fmt.Errorf("error inserting transactions: %w", err)
-	// }
-	// fmt.Println(time.Since(t1))
-
-	return l, nil
+	log.Printf("stored %v ledgers [%v-%v] and %v transactions in %s\n",
+		len(l), l[0].Identifier.Index, l[len(l)-1].Identifier.Index, len(txs), time.Since(t0))
+	return nil
 }
