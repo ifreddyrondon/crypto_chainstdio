@@ -44,6 +44,6 @@ docker-stop:
 docker-background:
 	docker-compose up -d
 
-.PHONY: worker
-worker:
+.PHONY: run-worker
+run-worker:
 	go vet ./cmd/worker/ && go run ./cmd/worker/

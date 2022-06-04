@@ -58,4 +58,8 @@ type Transaction struct {
 	Identifier Identifier
 	// Identifier of the ledger this transaction resides in
 	Ledger Identifier
+	// From represent the sending party of the transaction
+	From Identifier
+	// To represent the receiving party of the transaction
+	To Identifier
 }

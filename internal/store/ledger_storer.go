@@ -15,19 +15,16 @@ import (
 var ErrNotFoundLedgers = errors.New("not found ledgers")
 
 type Ledger struct {
-	pool   *pgxpool.Pool
-	params Params
+	pool       *pgxpool.Pool
+	blockchain pkg.Blockchain
+	network    pkg.Network
 }
 
-type Params struct {
-	Blockchain pkg.Blockchain
-	Network    pkg.Network
-}
-
-func NewLedger(pool *pgxpool.Pool, p Params) Ledger {
+func NewLedger(pool *pgxpool.Pool, b pkg.Blockchain, n pkg.Network) Ledger {
 	return Ledger{
-		pool:   pool,
-		params: p,
+		pool:       pool,
+		blockchain: b,
+		network:    n,
 	}
 }
 
@@ -50,10 +47,10 @@ LIMIT 1;
 `
 
 func (s Ledger) Latest(ctx context.Context) (pkg.Ledger, error) {
-	row := s.pool.QueryRow(ctx, getLatestLedgerQry, s.params.Blockchain, s.params.Network)
+	row := s.pool.QueryRow(ctx, getLatestLedgerQry, s.blockchain, s.network)
 	ledger := pkg.Ledger{
-		Blockchain: s.params.Blockchain,
-		Network:    s.params.Network,
+		Blockchain: s.blockchain,
+		Network:    s.network,
 	}
 	if err := row.Scan(
 		&ledger.ID,
@@ -87,8 +84,8 @@ RETURNING id, created_at, updated_at;
 func (s Ledger) Save(ctx context.Context, l pkg.Ledger) (pkg.Ledger, error) {
 	row := s.pool.QueryRow(
 		ctx, saveLedgerQry,
-		s.params.Blockchain,
-		s.params.Network,
+		s.blockchain,
+		s.network,
 		l.Identifier.Hash,
 		l.Identifier.Index,
 		l.PreviousLedger.Hash,

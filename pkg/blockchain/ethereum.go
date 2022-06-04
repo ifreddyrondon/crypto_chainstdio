@@ -209,27 +209,36 @@ func (e Ethereum) transactionsFromBlock(ctx context.Context, transactions []Ethe
 	if len(transactions) == 0 {
 		return txs, nil
 	}
-	for i, tx := range transactions {
+	for _, tx := range transactions {
 		cleanedBlockNumber, err := CleanHexString(tx.BlockNumber)
 		if err != nil {
 			return txs, fmt.Errorf("error cleaning hex transaction block numer %s. err: %w", tx.BlockNumber, err)
 		}
-
 		blockNumber, err := hexutil.DecodeUint64(cleanedBlockNumber)
 		if err != nil {
 			return txs, fmt.Errorf("error decoding transaction block number hex %s. err: %w", cleanedBlockNumber, err)
+		}
+		cleanedTxIndex, err := CleanHexString(tx.Index)
+		if err != nil {
+			return txs, fmt.Errorf("error cleaning hex transaction index %s. err: %w", tx.Index, err)
+		}
+		txIndex, err := hexutil.DecodeUint64(cleanedTxIndex)
+		if err != nil {
+			return txs, fmt.Errorf("error decoding transaction index hex %s. err: %w", txIndex, err)
 		}
 		t := pkg.Transaction{
 			Blockchain: pkg.Blockchain_ETHEREUM,
 			Network:    e.network,
 			Identifier: pkg.Identifier{
 				Hash:  string(tx.Hash),
-				Index: uint64(i),
+				Index: txIndex,
 			},
 			Ledger: pkg.Identifier{
 				Hash:  string(tx.BlockHash),
 				Index: blockNumber,
 			},
+			From: pkg.Identifier{Hash: string(tx.From)},
+			To:   pkg.Identifier{Hash: string(tx.To)},
 		}
 		txs = append(txs, t)
 	}

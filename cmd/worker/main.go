@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v4/pgxpool"
 
 	"github.com/ifreddyrondon/crypto_chainstdio/internal/store"
-	"github.com/ifreddyrondon/crypto_chainstdio/internal/worker"
+	"github.com/ifreddyrondon/crypto_chainstdio/internal/syncronizer"
 	"github.com/ifreddyrondon/crypto_chainstdio/pkg"
 	"github.com/ifreddyrondon/crypto_chainstdio/pkg/blockchain"
 	"github.com/ifreddyrondon/crypto_chainstdio/pkg/manager"
@@ -50,17 +50,12 @@ func run() error {
 
 	// ethereum
 	ethFetcher := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET)
-	ledgerStore := store.NewLedger(dbpool, store.Params{
-		Blockchain: pkg.Blockchain_ETHEREUM,
-		Network:    pkg.Network_ETHEREUM_MAINNET,
-	})
+	ledgerStore := store.NewLedger(dbpool, pkg.Blockchain_ETHEREUM, pkg.Network_ETHEREUM_MAINNET)
+	txsStore := store.NewTransaction(dbpool, pkg.Blockchain_ETHEREUM, pkg.Network_ETHEREUM_MAINNET)
 
-	// worker
-	reconciler := worker.NewReconciler(&ethFetcher, ledgerStore)
-	wkr := worker.New(&ethFetcher, reconciler)
-
+	sync := syncronizer.New(&ethFetcher, ledgerStore, txsStore)
 	mgr := manager.New()
-	mgr.AddService(manager.ServiceFactory("worker", wkr.Run))
+	mgr.AddService(manager.ServiceFactory("worker", sync.Run))
 
 	mgr.WaitForInterrupt()
 	return nil
