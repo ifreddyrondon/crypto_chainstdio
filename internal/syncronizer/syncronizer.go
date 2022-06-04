@@ -20,9 +20,6 @@ type (
 		Latest(ctx context.Context) (pkg.Ledger, error)
 		Save(ctx context.Context, l pkg.Ledger) (pkg.Ledger, error)
 	}
-	TransactionStore interface {
-		BatchSave(ctx context.Context, txs ...pkg.Transaction) error
-	}
 )
 
 type Synchronizer struct {
@@ -30,16 +27,14 @@ type Synchronizer struct {
 	pollerBatchSize uint64
 	fetcher         LedgerFetcher
 	ledgerStore     LedgerStore
-	txsStore        TransactionStore
 }
 
-func New(f LedgerFetcher, ledgerStore LedgerStore, txsStore TransactionStore) Synchronizer {
+func New(f LedgerFetcher, ledgerStore LedgerStore) Synchronizer {
 	return Synchronizer{
 		pollerBatchSize: 5,
 		pollerInterval:  time.Second * 15,
 		fetcher:         f,
 		ledgerStore:     ledgerStore,
-		txsStore:        txsStore,
 	}
 }
 
@@ -55,7 +50,7 @@ func (s Synchronizer) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		latestLedgerStored, err = s.save(ctx, l)
+		latestLedgerStored, err = s.ledgerStore.Save(ctx, l)
 		if err != nil {
 			return fmt.Errorf("error saving genesis ledger: %w", err)
 		}
@@ -70,7 +65,7 @@ func (s Synchronizer) Run(ctx context.Context) error {
 			return err
 		}
 		for _, l := range ledgers {
-			if _, err := s.save(ctx, l); err != nil {
+			if _, err := s.ledgerStore.Save(ctx, l); err != nil {
 				return err
 			}
 		}
@@ -93,17 +88,6 @@ func (s Synchronizer) poller(ctx context.Context, ids []pkg.Identifier) ([]pkg.L
 	l, err := s.fetcher.Ledgers(ctx, ids...)
 	if err != nil {
 		return nil, fmt.Errorf("error polling ledgers. err: %w", err)
-	}
-	return l, nil
-}
-
-func (s Synchronizer) save(ctx context.Context, l pkg.Ledger) (pkg.Ledger, error) {
-	l, err := s.ledgerStore.Save(ctx, l)
-	if err != nil {
-		return l, fmt.Errorf("error saving ledger: %w", err)
-	}
-	if err := s.txsStore.BatchSave(ctx, l.Transactions...); err != nil {
-		return l, fmt.Errorf("error saving transactions: %w", err)
 	}
 	return l, nil
 }

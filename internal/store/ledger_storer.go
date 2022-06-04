@@ -2,17 +2,36 @@ package store
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/pkg/errors"
 
 	"github.com/ifreddyrondon/crypto_chainstdio/pkg"
 )
 
 var ErrNotFoundLedgers = errors.New("not found ledgers")
+
+var (
+	transactionsTableID = pgx.Identifier{"transactions"}
+	txsTableInsertCols  = []string{
+		"blockchain",
+		"network",
+		"identifier_hash",
+		"identifier_index",
+		"ledger_hash",
+		"ledger_index",
+		"from_address",
+		"to_address",
+		"fee_amount",
+		"fee_currency",
+		"status",
+		"metadata",
+		"timestamp",
+	}
+)
 
 type Ledger struct {
 	pool       *pgxpool.Pool
@@ -99,10 +118,58 @@ func (s Ledger) Save(ctx context.Context, l pkg.Ledger) (pkg.Ledger, error) {
 	var createdAt time.Time
 	var lastUpdatedAt time.Time
 	if err := row.Scan(&id, &createdAt, &lastUpdatedAt); err != nil {
-		return l, fmt.Errorf("error inserting ledger: %w", err)
+		return l, errors.Wrap(err, "error inserting ledger")
 	}
 	l.ID = id
 	l.CreatedAt = createdAt
 	l.LastUpdatedAt = lastUpdatedAt
+
+	if len(l.Transactions) == 0 {
+		return l, nil
+	}
+
+	cpSrcFn := pgx.CopyFromSlice(len(l.Transactions), func(i int) ([]interface{}, error) {
+		return []interface{}{
+			s.blockchain,
+			s.network,
+			l.Transactions[i].Identifier.Hash,
+			l.Transactions[i].Identifier.Index,
+			l.Transactions[i].Ledger.Hash,
+			l.Transactions[i].Ledger.Index,
+			l.Transactions[i].From.Hash,
+			l.Transactions[i].To.Hash,
+			nil, nil,
+			nil,
+			nil,
+			nil,
+		}, nil
+	})
+	if _, err := s.pool.CopyFrom(ctx, transactionsTableID, txsTableInsertCols, cpSrcFn); err != nil {
+		return l, errors.Wrap(err, "error batch save transactions")
+	}
+
+	// batch := pgx.Batch{}
+	// for _, b := range txs {
+	// 	batch.Queue(saveTxQry,
+	// 		t.blockchain,
+	// 		t.network,
+	// 		b.Identifier.Hash,
+	// 		b.Identifier.Index,
+	// 		b.Ledger.Hash,
+	// 		b.Ledger.Index,
+	// 		b.From.Hash,
+	// 		b.To.Hash,
+	// 		nil, nil,
+	// 		nil,
+	// 		nil,
+	// 		nil,
+	// 	)
+	// }
+	// batchRes := t.pool.SendBatch(ctx, &batch)
+	// if _, err := batchRes.Exec(); err != nil {
+	// 	return fmt.Errorf("error inserting transactions: %w", err)
+	// }
+	// fmt.Println(time.Since(t1))
+
 	return l, nil
 }
