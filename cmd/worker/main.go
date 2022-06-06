@@ -51,8 +51,11 @@ func run() error {
 	// ethereum
 	ethFetcher := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET)
 	ledgerStore := store.NewLedger(dbpool, pkg.Blockchain_ETHEREUM, pkg.Network_ETHEREUM_MAINNET)
+	worker0 := syncronizer.NewWorker(ethFetcher, ledgerStore)
 
-	sync := syncronizer.New(&ethFetcher, ledgerStore)
+	sync := syncronizer.New(&ethFetcher, ledgerStore, []syncronizer.Worker{
+		worker0,
+	})
 	mgr := manager.New()
 	mgr.AddService(manager.ServiceFactory("worker", sync.Run))
 

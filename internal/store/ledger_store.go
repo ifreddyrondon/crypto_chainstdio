@@ -3,8 +3,6 @@ package store
 import (
 	"context"
 	"fmt"
-	"log"
-	"time"
 
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
@@ -104,11 +102,10 @@ func (s Ledger) Latest(ctx context.Context) (pkg.Ledger, error) {
 	return ledger, nil
 }
 
-func (s Ledger) Save(ctx context.Context, l ...pkg.Ledger) error {
+func (s Ledger) Save(ctx context.Context, l ...pkg.Ledger) (int, error) {
 	if len(l) == 0 {
-		return nil
+		return 0, nil
 	}
-	t0 := time.Now()
 	var txs []pkg.Transaction
 	ledgerSrcFn := pgx.CopyFromSlice(len(l), func(i int) ([]interface{}, error) {
 		txs = append(txs, l[i].Transactions...)
@@ -125,11 +122,11 @@ func (s Ledger) Save(ctx context.Context, l ...pkg.Ledger) error {
 		}, nil
 	})
 	if _, err := s.pool.CopyFrom(ctx, ledgerTableID, ledgerTableInsertCols, ledgerSrcFn); err != nil {
-		return errors.Wrap(err, "error bulk saving ledgers")
+		return 0, errors.Wrap(err, "error bulk saving ledgers")
 	}
 
 	if len(txs) == 0 {
-		return nil
+		return 0, nil
 	}
 	cpSrcFn := pgx.CopyFromSlice(len(txs), func(i int) ([]interface{}, error) {
 		return []interface{}{
@@ -148,9 +145,7 @@ func (s Ledger) Save(ctx context.Context, l ...pkg.Ledger) error {
 		}, nil
 	})
 	if _, err := s.pool.CopyFrom(ctx, transactionsTableID, txsTableInsertCols, cpSrcFn); err != nil {
-		return errors.Wrap(err, "error bulk saving transactions")
+		return 0, errors.Wrap(err, "error bulk saving transactions")
 	}
-	log.Printf("stored %v ledgers [%v-%v] and %v transactions in %s\n",
-		len(l), l[0].Identifier.Index, l[len(l)-1].Identifier.Index, len(txs), time.Since(t0))
-	return nil
+	return len(txs), nil
 }
