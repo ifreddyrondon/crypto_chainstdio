@@ -35,23 +35,24 @@ func NewWorker(f fetcher, s storer) Worker {
 
 func (w Worker) Run(ctx context.Context, from, to uint64) error {
 	chunks := split(from, to, w.batchSize)
-	txnTotal := 0
 	tTotal := time.Now()
-	for i, chunk := range chunks {
-		tChunk := time.Now()
-		ledgers, err := w.fetcher.Ledgers(ctx, chunk...)
+	ledgers := make([]pkg.Ledger, 0, (to-from)+1)
+	for _, chunk := range chunks {
+		t0 := time.Now()
+		l, err := w.fetcher.Ledgers(ctx, chunk...)
 		if err != nil {
 			return errors.Wrap(err, "error polling ledgers")
 		}
-		txnNumber, err := w.storer.Save(ctx, ledgers...)
-		if err != nil {
-			return errors.Wrap(err, "error saving ledgers")
-		}
-		txnTotal += txnNumber
-		log.Printf("[worker0][chunk-%v] stored %v ledgers [%v-%v] and %v transactions in %s\n",
-			i, len(chunk), chunk[0].Index, chunk[len(chunk)-1].Index, txnNumber, time.Since(tChunk))
+		log.Printf("fetching %v ledgers on time %s\n", len(chunk), time.Since(t0))
+		ledgers = append(ledgers, l...)
 	}
-	log.Printf("[worker0] stored total: %v ledgers and %v transactions on %s\n", to-from, txnTotal, time.Since(tTotal))
+	t1 := time.Now()
+	txnNumber, err := w.storer.Save(ctx, ledgers...)
+	if err != nil {
+		return errors.Wrap(err, "error saving ledgers")
+	}
+	log.Printf("store %s\n", time.Since(t1))
+	log.Printf("[worker0] stored total: %v ledgers and %v transactions on %s\n", len(ledgers), txnNumber, time.Since(tTotal))
 	return nil
 }
 

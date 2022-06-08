@@ -56,7 +56,7 @@ func (s Synchronizer) Run(ctx context.Context) error {
 	from := latestLedgerOFF.Identifier.Index + 1
 	latest := latestLedgerON.Identifier.Index
 	for from < latest {
-		to := from + 5000
+		to := from + 2000 // tiempo promedio de guardado 350 a 400ms
 		if to > latest {
 			to = latest
 		}
