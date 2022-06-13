@@ -11,25 +11,25 @@ import (
 )
 
 type (
-	fetcher interface {
+	Fetcher interface {
 		Ledgers(ctx context.Context, ids ...pkg.Identifier) ([]pkg.Ledger, error)
 	}
-	storer interface {
+	Storage interface {
 		Save(ctx context.Context, l ...pkg.Ledger) (int, error)
 	}
 )
 
 type Worker struct {
-	fetcher   fetcher
-	storer    storer
-	batchSize uint64
+	fetcherPool []Fetcher
+	storage     Storage
+	batchSize   uint64
 }
 
-func NewWorker(f fetcher, s storer) Worker {
+func NewWorker(s Storage, fetcherPool []Fetcher) Worker {
 	return Worker{
-		fetcher:   f,
-		storer:    s,
-		batchSize: 500,
+		storage:     s,
+		fetcherPool: fetcherPool,
+		batchSize:   500,
 	}
 }
 
@@ -39,7 +39,7 @@ func (w Worker) Run(ctx context.Context, from, to uint64) error {
 	ledgers := make([]pkg.Ledger, 0, (to-from)+1)
 	for _, chunk := range chunks {
 		t0 := time.Now()
-		l, err := w.fetcher.Ledgers(ctx, chunk...)
+		l, err := w.fetcherPool[0].Ledgers(ctx, chunk...)
 		if err != nil {
 			return errors.Wrap(err, "error polling ledgers")
 		}
@@ -47,11 +47,11 @@ func (w Worker) Run(ctx context.Context, from, to uint64) error {
 		ledgers = append(ledgers, l...)
 	}
 	t1 := time.Now()
-	txnNumber, err := w.storer.Save(ctx, ledgers...)
+	txnNumber, err := w.storage.Save(ctx, ledgers...)
 	if err != nil {
 		return errors.Wrap(err, "error saving ledgers")
 	}
-	log.Printf("store %s\n", time.Since(t1))
+	log.Printf("stored %s\n", time.Since(t1))
 	log.Printf("[worker0] stored total: %v ledgers and %v transactions on %s\n", len(ledgers), txnNumber, time.Since(tTotal))
 	return nil
 }

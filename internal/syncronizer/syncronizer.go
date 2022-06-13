@@ -5,7 +5,7 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/ifreddyrondon/crypto_chainstdio/internal/store"
+	"github.com/ifreddyrondon/crypto_chainstdio/internal/storage"
 	"github.com/ifreddyrondon/crypto_chainstdio/pkg"
 )
 
@@ -36,7 +36,7 @@ func (s Synchronizer) Run(ctx context.Context) error {
 	// check last ledger saved
 	latestLedgerOFF, err := s.fetcherOFF.Latest(ctx)
 	if err != nil {
-		if err != store.ErrNotFoundLedgers {
+		if err != storage.ErrNotFoundLedgers {
 			return errors.Wrap(err, "error getting latest stored ledger")
 		}
 		// first time syncing network

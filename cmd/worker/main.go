@@ -8,7 +8,7 @@ import (
 	"github.com/caarlos0/env/v6"
 	"github.com/jackc/pgx/v4/pgxpool"
 
-	"github.com/ifreddyrondon/crypto_chainstdio/internal/store"
+	"github.com/ifreddyrondon/crypto_chainstdio/internal/storage"
 	"github.com/ifreddyrondon/crypto_chainstdio/internal/syncronizer"
 	"github.com/ifreddyrondon/crypto_chainstdio/pkg"
 	"github.com/ifreddyrondon/crypto_chainstdio/pkg/blockchain"
@@ -49,11 +49,12 @@ func run() error {
 	_ = dbpool
 
 	// ethereum
-	ethFetcher := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET)
-	ledgerStore := store.NewLedger(dbpool, pkg.Blockchain_ETHEREUM, pkg.Network_ETHEREUM_MAINNET)
-	worker0 := syncronizer.NewWorker(ethFetcher, ledgerStore)
+	ethFetcher1 := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET)
+	ethFetcher2 := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET)
+	ledgerStorage := storage.NewLedger(dbpool, pkg.Blockchain_ETHEREUM, pkg.Network_ETHEREUM_MAINNET)
+	worker0 := syncronizer.NewWorker(ledgerStorage, []syncronizer.Fetcher{ethFetcher1, ethFetcher2})
 
-	sync := syncronizer.New(&ethFetcher, ledgerStore, []syncronizer.Worker{
+	sync := syncronizer.New(&ethFetcher1, ledgerStorage, []syncronizer.Worker{
 		worker0,
 	})
 	mgr := manager.New()
