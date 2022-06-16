@@ -34,16 +34,13 @@ add-migration:
 
 .PHONY: docker-up
 docker-up:
-	docker-compose up
+	docker-compose up -d
 
 .PHONY: docker-stop
 docker-stop:
 	docker-compose stop
 
-.PHONY: docker-background
-docker-background:
-	docker-compose up -d
 
-.PHONY: run-worker
-run-worker:
-	go vet ./cmd/worker/ && go run ./cmd/worker/
+.PHONY: run
+run:
+	go vet ./cmd/sync/ && go run ./cmd/sync/
