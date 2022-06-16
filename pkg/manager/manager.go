@@ -70,7 +70,7 @@ func (m *Manager) AddShutdownHook(fn func()) {
 // WaitForInterrupt will block until a signal is sent to shut down the process
 func (m *Manager) WaitForInterrupt() {
 	gracefulShutdown()
-	log.Printf("shutting down")
+	log.Printf("shutting down process...")
 	m.cancelFn()
 	// Wait for all services finish
 	m.servicesWg.Wait()

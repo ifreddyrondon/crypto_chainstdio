@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/caarlos0/env/v6"
@@ -17,7 +18,7 @@ import (
 
 func main() {
 	if err := run(); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "error running worker: %s\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "error running syncronizer: %s\n", err)
 		os.Exit(1)
 	}
 }
@@ -46,7 +47,6 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("error creating conn pool: %w", err)
 	}
-	_ = dbpool
 
 	// ethereum
 	ethFetcher1 := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET)
@@ -58,7 +58,11 @@ func run() error {
 		worker0,
 	})
 	mgr := manager.New()
-	mgr.AddService(manager.ServiceFactory("worker", sync.Run))
+	mgr.AddService(manager.ServiceFactory("syncronizer", sync.Run))
+	mgr.AddShutdownHook(func() {
+		log.Printf("closing conection pool")
+		dbpool.Close()
+	})
 
 	mgr.WaitForInterrupt()
 	return nil
