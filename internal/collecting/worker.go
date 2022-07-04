@@ -2,6 +2,7 @@ package collecting
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -26,6 +27,10 @@ func (w *worker) work(ctx context.Context, wg *sync.WaitGroup, jobs <-chan []pkg
 			t0 := time.Now()
 			l, err := w.f.Ledgers(ctx, j...)
 			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					errCh <- err
+					break
+				}
 				return
 			}
 			w.log.Debug("fetching completed", zap.Int("amount", len(j)), zap.Duration("duration", time.Since(t0)))

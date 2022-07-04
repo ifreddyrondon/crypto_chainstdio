@@ -2,10 +2,7 @@ package manager
 
 import (
 	"context"
-	"os"
-	"os/signal"
 	"sync"
-	"syscall"
 
 	"go.uber.org/zap"
 )
@@ -37,8 +34,9 @@ type Manager struct {
 	serviceCtx    context.Context
 	cancelFn      context.CancelFunc
 	servicesWg    sync.WaitGroup
-	shutdownHooks []func()
 	log           *zap.Logger
+	shutdownHooks []func()
+	shutdownCh    chan bool
 }
 
 func New(log *zap.Logger) Manager {
@@ -49,6 +47,7 @@ func New(log *zap.Logger) Manager {
 		serviceCtx: serviceCtx,
 		cancelFn:   cancelFn,
 		servicesWg: sync.WaitGroup{},
+		shutdownCh: make(chan bool),
 		log:        log.Named("manager"),
 	}
 }
@@ -73,9 +72,15 @@ func (m *Manager) AddShutdownHook(fn func()) {
 	m.shutdownHooks = append(m.shutdownHooks, fn)
 }
 
-// WaitForInterrupt will block until a signal is sent to shut down the process
+// WaitForInterrupt will block until a signal SIGINT or SIGTERM
+// is received on manager.shutdownCh. After receiving a shutdown
+// signal, cancels service context then runs shutdown hooks.
 func (m *Manager) WaitForInterrupt() {
-	m.gracefulShutdown()
+	// 1 signal is graceful, 2 starts a 20 second to force kill, 3 is immediate force kill
+	GracefulShutdown(m.log, func() {
+		close(m.shutdownCh)
+	})
+	<-m.shutdownCh
 	m.log.Info("shutting down added services...")
 	m.cancelFn()
 	// Wait for all services finish
@@ -85,17 +90,4 @@ func (m *Manager) WaitForInterrupt() {
 		hook()
 	}
 	m.log.Info("hooks stopped")
-}
-
-func (m *Manager) gracefulShutdown() {
-	termCh := make(chan os.Signal)
-	signal.Notify(termCh, syscall.SIGTERM, syscall.SIGINT)
-	// Wait for the notify signal
-	for {
-		select {
-		case <-termCh:
-			m.log.Info("shutdown requested")
-			return
-		}
-	}
 }
