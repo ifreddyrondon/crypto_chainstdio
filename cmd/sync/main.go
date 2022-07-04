@@ -3,14 +3,17 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 
 	"github.com/caarlos0/env/v6"
 	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/pkg/errors"
+	"go.uber.org/zap"
 
+	"github.com/ifreddyrondon/crypto_chainstdio/internal/collecting"
+	"github.com/ifreddyrondon/crypto_chainstdio/internal/conciliator"
 	"github.com/ifreddyrondon/crypto_chainstdio/internal/storage"
-	"github.com/ifreddyrondon/crypto_chainstdio/internal/syncronizer"
+	"github.com/ifreddyrondon/crypto_chainstdio/internal/synchronizer"
 	"github.com/ifreddyrondon/crypto_chainstdio/pkg"
 	"github.com/ifreddyrondon/crypto_chainstdio/pkg/blockchain"
 	"github.com/ifreddyrondon/crypto_chainstdio/pkg/manager"
@@ -38,29 +41,47 @@ type conf struct {
 func run() error {
 	var cfg conf
 	if err := env.Parse(&cfg); err != nil {
-		return fmt.Errorf("error loading env vars: %w", err)
+		return errors.Wrap(err, "error loading env vars")
+	}
+
+	log, err := zap.NewDevelopment()
+	if err != nil {
+		return errors.Wrap(err, "error creating logger")
 	}
 
 	ctx := context.Background()
 	dbURI := fmt.Sprintf("postgres://%s:%s@%s/%s", cfg.DBUser, cfg.DBPass, cfg.DBHost, cfg.DBName)
 	dbpool, err := connPool(ctx, dbURI, cfg.DBMaxConnections)
 	if err != nil {
-		return fmt.Errorf("error creating conn pool: %w", err)
+		return errors.Wrap(err, "error creating DB connection pool")
 	}
 
-	// ethereum
+	ledgerStorage, err := storage.NewLedger(
+		dbpool,
+		pkg.Blockchain_ETHEREUM,
+		pkg.Network_ETHEREUM_MAINNET,
+		"ledgers",
+		"transactions",
+	)
+	if err != nil {
+		return errors.Wrap(err, "error creating ledger Storage")
+	}
 	ethFetcher1 := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET)
 	ethFetcher2 := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET)
-	ledgerStorage := storage.NewLedger(dbpool, pkg.Blockchain_ETHEREUM, pkg.Network_ETHEREUM_MAINNET)
-	worker0 := syncronizer.NewWorker(ledgerStorage, []syncronizer.Fetcher{ethFetcher1, ethFetcher2})
-
-	sync := syncronizer.New(&ethFetcher1, ledgerStorage, []syncronizer.Worker{
-		worker0,
+	ethFetcher3 := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET)
+	ethFetcher4 := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET)
+	collector := collecting.NewCollector(log, ledgerStorage, []collecting.BlockchainFetcher{
+		ethFetcher1,
+		ethFetcher2,
+		ethFetcher3,
+		ethFetcher4,
 	})
-	mgr := manager.New()
-	mgr.AddService(manager.ServiceFactory("syncronizer", sync.Run))
+	ledgerConciliator := conciliator.New(ledgerStorage, ethFetcher1, collector, log)
+	sync := synchronizer.New(ledgerConciliator, log)
+	mgr := manager.New(log)
+	mgr.AddService(manager.ServiceFactory("synchronizer", sync.Run))
 	mgr.AddShutdownHook(func() {
-		log.Printf("closing conection pool")
+		log.Info("closing connection pool")
 		dbpool.Close()
 	})
 
@@ -69,14 +90,14 @@ func run() error {
 }
 
 func connPool(ctx context.Context, dbURI string, maxConnections int32) (*pgxpool.Pool, error) {
-	config, err := pgxpool.ParseConfig(dbURI)
+	cfg, err := pgxpool.ParseConfig(dbURI)
 	if err != nil {
-		return nil, fmt.Errorf("parsing DB URI %s. err: %w", dbURI, err)
+		return nil, errors.Wrapf(err, "error parsing DB URI %s", dbURI)
 	}
-	config.MaxConns = maxConnections
-	dbpool, err := pgxpool.ConnectConfig(ctx, config)
+	cfg.MaxConns = maxConnections
+	dbpool, err := pgxpool.ConnectConfig(ctx, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("error connecting to postgres pool: %w", err)
+		return nil, errors.Wrap(err, "error connecting to postgres pool")
 	}
 	return dbpool, nil
 }

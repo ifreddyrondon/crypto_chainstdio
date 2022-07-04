@@ -2,11 +2,12 @@ package manager
 
 import (
 	"context"
-	"log"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
+
+	"go.uber.org/zap"
 )
 
 type Service interface {
@@ -37,9 +38,10 @@ type Manager struct {
 	cancelFn      context.CancelFunc
 	servicesWg    sync.WaitGroup
 	shutdownHooks []func()
+	log           *zap.Logger
 }
 
-func New() Manager {
+func New(log *zap.Logger) Manager {
 	ctx := context.Background()
 	serviceCtx, cancelFn := context.WithCancel(ctx)
 	return Manager{
@@ -47,6 +49,7 @@ func New() Manager {
 		serviceCtx: serviceCtx,
 		cancelFn:   cancelFn,
 		servicesWg: sync.WaitGroup{},
+		log:        log.Named("manager"),
 	}
 }
 
@@ -54,12 +57,15 @@ func (m *Manager) AddService(s Service) {
 	m.servicesWg.Add(1)
 	go func() {
 		defer m.servicesWg.Done()
-		log.Printf("adding service '%s'\n", s.Name())
+		m.log.Info("adding service", zap.String("serviceName", s.Name()))
 		if err := s.Run(m.serviceCtx); err != nil {
-			log.Printf("service '%s' exited with error: %v\n", s.Name(), err)
+			m.log.Error("service exited with error",
+				zap.Error(err),
+				zap.String("serviceName", s.Name()),
+			)
 			return
 		}
-		log.Printf("service '%s' exited successfully\n", s.Name())
+		m.log.Info("service exited successfully", zap.String("serviceName", s.Name()))
 	}()
 }
 
@@ -69,25 +75,26 @@ func (m *Manager) AddShutdownHook(fn func()) {
 
 // WaitForInterrupt will block until a signal is sent to shut down the process
 func (m *Manager) WaitForInterrupt() {
-	gracefulShutdown()
-	log.Printf("shutting down process...")
+	m.gracefulShutdown()
+	m.log.Info("shutting down added services...")
 	m.cancelFn()
 	// Wait for all services finish
 	m.servicesWg.Wait()
-	log.Printf("running shutdown hooks")
+	m.log.Info("running shutdown hooks")
 	for _, hook := range m.shutdownHooks {
 		hook()
 	}
+	m.log.Info("hooks stopped")
 }
 
-func gracefulShutdown() {
+func (m *Manager) gracefulShutdown() {
 	termCh := make(chan os.Signal)
 	signal.Notify(termCh, syscall.SIGTERM, syscall.SIGINT)
 	// Wait for the notify signal
 	for {
 		select {
 		case <-termCh:
-			log.Printf("shutdown requested\n")
+			m.log.Info("shutdown requested")
 			return
 		}
 	}
