@@ -107,12 +107,11 @@ func (c Conciliator) conciliate(ctx context.Context) error {
 		return nil
 	}
 	for from < toOnChain && ctx.Err() == nil {
-		to := from + 2000
+		to := from + 5000
 		if to > toOnChain {
 			to = toOnChain
 		}
 		if err := c.collector.CollectByInterval(ctx, from, to); err != nil {
-			c.log.Info("lalalan")
 			return errors.Wrap(err, "error conciliating ledgers")
 		}
 		from = to

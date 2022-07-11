@@ -32,7 +32,13 @@ type Collector struct {
 func NewCollector(log *zap.Logger, s LedgerStorage, fetchers []BlockchainFetcher) Collector {
 	workers := make([]worker, 0, len(fetchers))
 	for i, f := range fetchers {
-		workers = append(workers, worker{f: f, log: log.Named(fmt.Sprintf("worker%v", i+1))})
+		workers = append(workers, worker{
+			f:                  f,
+			retryAttempts:      3,
+			retrySleepDuration: time.Millisecond * 100,
+			exponentialBackoff: 2,
+			log:                log.Named(fmt.Sprintf("worker%v", i+1)),
+		})
 	}
 	return Collector{
 		storage:   s,

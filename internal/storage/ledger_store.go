@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/lib/pq"
@@ -21,7 +20,6 @@ var (
 	errMissingTxsTableName    = errors.New("missing transactions table name")
 
 	ledgerTableInsertCols = []string{
-		"id",
 		"blockchain",
 		"network",
 		"identifier_hash",
@@ -32,10 +30,8 @@ var (
 		"timestamp",
 		"metadata",
 		"created_at",
-		"updated_at",
 	}
 	txsTableInsertCols = []string{
-		"id",
 		"blockchain",
 		"network",
 		"identifier_hash",
@@ -44,11 +40,8 @@ var (
 		"ledger_index",
 		"from_address",
 		"to_address",
-		"fee_amount",
-		"fee_currency",
-		"status",
 		"metadata",
-		"timestamp",
+		"created_at",
 	}
 )
 
@@ -93,16 +86,14 @@ func buildTransactionUpsertQry(txsTableName string) string {
 }
 
 const getLatestLedgerQry = `
-SELECT id,
-       identifier_hash,
+SELECT identifier_hash,
        identifier_index,
        previous_ledger_hash,
        previous_ledger_index,
        orphaned,
        timestamp,
        metadata,
-       created_at,
-       updated_at
+       created_at
 FROM %s
 WHERE blockchain = $1
   AND network = $2
@@ -118,16 +109,14 @@ func (s Ledger) Latest(ctx context.Context) (pkg.Ledger, error) {
 		Network:    s.network,
 	}
 	if err := row.Scan(
-		&ledger.ID,
 		&ledger.Identifier.Hash,
 		&ledger.Identifier.Index,
 		&ledger.PreviousLedger.Hash,
 		&ledger.PreviousLedger.Index,
 		&ledger.Orphaned,
 		&ledger.Timestamp,
-		&ledger.CreatedAt,
-		&ledger.LastUpdatedAt,
 		&ledger.Metadata,
+		&ledger.CreatedAt,
 	); err != nil {
 		if errors.As(err, &pgx.ErrNoRows) {
 			return ledger, ErrNotFoundLedgers
@@ -185,7 +174,6 @@ func (s Ledger) Save(ctx context.Context, l ...pkg.Ledger) (int, error) {
 		txs = append(txs, l[i].Transactions...)
 		now := time.Now().UTC()
 		return []interface{}{
-			uuid.New(),
 			s.blockchain,
 			s.network,
 			l[i].Identifier.Hash,
@@ -195,7 +183,6 @@ func (s Ledger) Save(ctx context.Context, l ...pkg.Ledger) (int, error) {
 			l[i].Orphaned,
 			l[i].Timestamp,
 			l[i].Metadata,
-			now,
 			now,
 		}, nil
 	})
@@ -209,8 +196,8 @@ func (s Ledger) Save(ctx context.Context, l ...pkg.Ledger) (int, error) {
 		return 0, errors.Wrap(err, "error creating _temp_transactions table")
 	}
 	cpyTxsFn := pgx.CopyFromSlice(len(txs), func(i int) ([]interface{}, error) {
+		now := time.Now().UTC()
 		return []interface{}{
-			uuid.New(),
 			s.blockchain,
 			s.network,
 			txs[i].Identifier.Hash,
@@ -219,10 +206,8 @@ func (s Ledger) Save(ctx context.Context, l ...pkg.Ledger) (int, error) {
 			txs[i].Ledger.Index,
 			txs[i].From.Hash,
 			txs[i].To.Hash,
-			nil, nil,
 			nil,
-			nil,
-			nil,
+			now,
 		}, nil
 	})
 	if _, err = pgTX.CopyFrom(ctx, pgx.Identifier{"_temp_transactions"}, txsTableInsertCols, cpyTxsFn); err != nil {
@@ -257,7 +242,6 @@ func (s Ledger) SaveWithoutTransactionsChecks(ctx context.Context, l ...pkg.Ledg
 		txs = append(txs, l[i].Transactions...)
 		now := time.Now().UTC()
 		return []interface{}{
-			uuid.New(),
 			s.blockchain,
 			s.network,
 			l[i].Identifier.Hash,
@@ -268,7 +252,6 @@ func (s Ledger) SaveWithoutTransactionsChecks(ctx context.Context, l ...pkg.Ledg
 			l[i].Timestamp,
 			l[i].Metadata,
 			now,
-			now,
 		}, nil
 	})
 	if _, err = pgTX.CopyFrom(ctx, pgx.Identifier{s.ledgerTableName}, ledgerTableInsertCols, ledgerSrcFn); err != nil {
@@ -278,8 +261,8 @@ func (s Ledger) SaveWithoutTransactionsChecks(ctx context.Context, l ...pkg.Ledg
 		return 0, nil
 	}
 	cpyTxsFn := pgx.CopyFromSlice(len(txs), func(i int) ([]interface{}, error) {
+		now := time.Now().UTC()
 		return []interface{}{
-			uuid.New(),
 			s.blockchain,
 			s.network,
 			txs[i].Identifier.Hash,
@@ -288,10 +271,8 @@ func (s Ledger) SaveWithoutTransactionsChecks(ctx context.Context, l ...pkg.Ledg
 			txs[i].Ledger.Index,
 			txs[i].From.Hash,
 			txs[i].To.Hash,
-			nil, nil,
 			nil,
-			nil,
-			nil,
+			now,
 		}, nil
 	})
 	if _, err = pgTX.CopyFrom(ctx, pgx.Identifier{s.txsTableName}, txsTableInsertCols, cpyTxsFn); err != nil {

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 
 	"github.com/caarlos0/env/v6"
@@ -66,17 +67,18 @@ func run() error {
 	if err != nil {
 		return errors.Wrap(err, "error creating ledger Storage")
 	}
-	ethFetcher1 := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET)
-	ethFetcher2 := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET)
-	ethFetcher3 := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET)
-	ethFetcher4 := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET)
-	collector := collecting.NewCollector(log, ledgerStorage, []collecting.BlockchainFetcher{
+	c := fetcherClient()
+	ethFetcher1 := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET, c)
+	ethFetcher2 := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET, c)
+	ethFetcher3 := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET, c)
+	ethFetcher4 := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET, c)
+	collector1 := collecting.NewCollector(log, ledgerStorage, []collecting.BlockchainFetcher{
 		ethFetcher1,
 		ethFetcher2,
 		ethFetcher3,
 		ethFetcher4,
 	})
-	ledgerConciliator := conciliator.New(ledgerStorage, ethFetcher1, collector, log)
+	ledgerConciliator := conciliator.New(ledgerStorage, ethFetcher1, collector1, log)
 	sync := synchronizer.New(ledgerConciliator, log)
 	mgr := manager.New(log)
 	mgr.AddService(manager.ServiceFactory("synchronizer", sync.Run))
@@ -100,4 +102,12 @@ func connPool(ctx context.Context, dbURI string, maxConnections int32) (*pgxpool
 		return nil, errors.Wrap(err, "error connecting to postgres pool")
 	}
 	return dbpool, nil
+}
+
+func fetcherClient() *http.Client {
+	// limit the max idle connections to avoid connection reset by peer
+	return &http.Client{Transport: &http.Transport{
+		MaxIdleConns:        20,
+		MaxIdleConnsPerHost: 20,
+	}}
 }

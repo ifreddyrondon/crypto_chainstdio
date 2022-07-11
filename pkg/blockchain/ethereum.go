@@ -111,9 +111,9 @@ type Ethereum struct {
 	c        *jsonrpc.Client
 }
 
-func NewEthereum(nodesURL string, network pkg.Network) Ethereum {
+func NewEthereum(nodesURL string, network pkg.Network, c *http.Client) Ethereum {
 	return Ethereum{
-		c:        jsonrpc.New(&http.Client{}),
+		c:        jsonrpc.New(c),
 		nodesURL: nodesURL,
 		network:  network,
 	}
