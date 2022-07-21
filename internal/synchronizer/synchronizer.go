@@ -2,31 +2,30 @@ package synchronizer
 
 import (
 	"context"
-	"time"
 
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
-
-	"github.com/ifreddyrondon/crypto_chainstdio/pkg"
 )
 
 type (
-	BlockchainFetcher interface {
-		Latest(ctx context.Context) (pkg.Ledger, error)
-	}
-
 	Conciliator interface {
 		Conciliate(ctx context.Context) error
+	}
+	Updater interface {
+		Update(ctx context.Context) error
 	}
 )
 
 type Synchronizer struct {
 	conciliator Conciliator
+	updater     Updater
 	log         *zap.Logger
 }
 
-func New(conciliator Conciliator, log *zap.Logger) Synchronizer {
-	return Synchronizer{
+func New(conciliator Conciliator, updater Updater, log *zap.Logger) *Synchronizer {
+	return &Synchronizer{
 		conciliator: conciliator,
+		updater:     updater,
 		log:         log.Named("synchronizer"),
 	}
 }
@@ -34,16 +33,24 @@ func New(conciliator Conciliator, log *zap.Logger) Synchronizer {
 func (s Synchronizer) Run(ctx context.Context) error {
 	errCh := make(chan error)
 	doneCh := make(chan bool)
-	go s.sync(ctx, errCh, doneCh)
+	ctx2, cancel := context.WithCancel(ctx)
+	defer func() {
+		cancel()
+		s.log.Info("done")
+	}()
+	go s.sync(ctx2, errCh, doneCh)
 	for {
 		select {
+		case <-doneCh: // not a real case given a blockchain always should be alive
+			return nil
 		case <-ctx.Done():
-			s.log.Info("shutting down synchronizer...")
+			s.log.Info("shutting down...")
 			<-doneCh
-			s.log.Info("stopped synchronizer")
 			return nil
 		case err := <-errCh:
-			return err
+			cancel()
+			<-doneCh
+			return errors.Wrap(err, "error synchronizing")
 		}
 	}
 }
@@ -52,44 +59,47 @@ func (s Synchronizer) sync(ctx context.Context, errCh chan error, doneCh chan bo
 	defer func() {
 		doneCh <- true
 	}()
-	s.log.Info("starting syncing...")
+	s.log.Info("starting...")
 
 	// conciliation old ledgers
-	conciliatorCh := make(chan bool)
-	errConciliatorCh := make(chan error)
+	conciliationDoneCh := make(chan bool)
+	conciliationErrCh := make(chan error)
 	go func() {
-		s.log.Info("starting conciliation process")
+		defer func() {
+			conciliationDoneCh <- true
+		}()
 		if err := s.conciliator.Conciliate(ctx); err != nil {
-			errConciliatorCh <- err
+			conciliationErrCh <- err
 		}
-		conciliatorCh <- true
 	}()
-	// waiting for reconciling before start pooling
+	// waiting for reconciling before start updater
 	select {
-	case <-conciliatorCh:
-		s.log.Info("conciliation process done")
-	case err := <-errConciliatorCh:
+	case <-conciliationDoneCh: // it will continue
+	case err := <-conciliationErrCh:
 		errCh <- err
 		return
 	case <-ctx.Done():
-		s.log.Info("shutting down conciliation process...")
-		<-conciliatorCh
-		s.log.Info("stopped conciliation process...")
+		<-conciliationDoneCh
 		return
 	}
 
-	// pooling
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-	s.log.Info("starting ledger pooling...")
-	for {
-		select {
-		case <-ticker.C:
-			s.log.Info("pooling...")
-		case <-ctx.Done():
-			s.log.Info("shutting down ledger pooling...")
-			s.log.Info("stopped ledger pooling...")
-			return
+	// updater
+	updaterDoneCh := make(chan bool)
+	updaterErrCh := make(chan error)
+	go func() {
+		defer func() {
+			updaterDoneCh <- true
+		}()
+		if err := s.updater.Update(ctx); err != nil {
+			updaterErrCh <- err
 		}
+	}()
+	select {
+	case err := <-updaterErrCh:
+		errCh <- err
+		return
+	case <-ctx.Done():
+		<-updaterDoneCh
+		return
 	}
 }

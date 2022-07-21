@@ -12,9 +12,11 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ifreddyrondon/crypto_chainstdio/internal/collecting"
-	"github.com/ifreddyrondon/crypto_chainstdio/internal/conciliator"
 	"github.com/ifreddyrondon/crypto_chainstdio/internal/storage"
+	"github.com/ifreddyrondon/crypto_chainstdio/internal/storing"
 	"github.com/ifreddyrondon/crypto_chainstdio/internal/synchronizer"
+	"github.com/ifreddyrondon/crypto_chainstdio/internal/synchronizer/conciliating"
+	"github.com/ifreddyrondon/crypto_chainstdio/internal/synchronizer/updating"
 	"github.com/ifreddyrondon/crypto_chainstdio/pkg"
 	"github.com/ifreddyrondon/crypto_chainstdio/pkg/blockchain"
 	"github.com/ifreddyrondon/crypto_chainstdio/pkg/manager"
@@ -65,21 +67,26 @@ func run() error {
 		"transactions",
 	)
 	if err != nil {
-		return errors.Wrap(err, "error creating ledger Storage")
+		return errors.Wrap(err, "error creating ledger storage")
 	}
-	c := fetcherClient()
-	ethFetcher1 := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET, c)
-	ethFetcher2 := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET, c)
-	ethFetcher3 := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET, c)
-	ethFetcher4 := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET, c)
-	collector1 := collecting.NewCollector(log, ledgerStorage, []collecting.BlockchainFetcher{
-		ethFetcher1,
-		ethFetcher2,
-		ethFetcher3,
-		ethFetcher4,
-	})
-	ledgerConciliator := conciliator.New(ledgerStorage, ethFetcher1, collector1, log)
-	sync := synchronizer.New(ledgerConciliator, log)
+	c := &http.Client{Transport: &http.Transport{
+		MaxIdleConns:        20,
+		MaxIdleConnsPerHost: 20,
+	}}
+	ethClient := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET, c)
+	ethClients := []collecting.BlockchainFetcher{
+		ethClient,
+		blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET, c),
+		blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET, c),
+		blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET, c),
+	}
+	syncCollector := collecting.NewSync(log, ethClients)
+	syncStorer := storing.NewSync(log, ledgerStorage)
+	ledgerConciliator := conciliating.New(ledgerStorage, syncCollector, syncStorer, log)
+
+	asyncCollector := collecting.NewAsync(log, ethClients)
+	ledgerUpdater := updating.New(ledgerStorage, ethClient, asyncCollector, log)
+	sync := synchronizer.New(ledgerConciliator, ledgerUpdater, log)
 	mgr := manager.New(log)
 	mgr.AddService(manager.ServiceFactory("synchronizer", sync.Run))
 	mgr.AddShutdownHook(func() {
@@ -102,12 +109,4 @@ func connPool(ctx context.Context, dbURI string, maxConnections int32) (*pgxpool
 		return nil, errors.Wrap(err, "error connecting to postgres pool")
 	}
 	return dbpool, nil
-}
-
-func fetcherClient() *http.Client {
-	// limit the max idle connections to avoid connection reset by peer
-	return &http.Client{Transport: &http.Transport{
-		MaxIdleConns:        20,
-		MaxIdleConnsPerHost: 20,
-	}}
 }

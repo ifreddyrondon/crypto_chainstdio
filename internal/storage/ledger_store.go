@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -165,8 +166,8 @@ func (s Ledger) Save(ctx context.Context, l ...pkg.Ledger) (int, error) {
 		return 0, errors.Wrap(err, "error creating transaction")
 	}
 	defer func() {
-		if err != nil {
-			pgTX.Rollback(ctx)
+		if err := pgTX.Rollback(ctx); err != nil {
+			log.Print(err)
 		}
 	}()
 	var txs []pkg.Transaction
@@ -190,6 +191,9 @@ func (s Ledger) Save(ctx context.Context, l ...pkg.Ledger) (int, error) {
 		return 0, errors.Wrap(err, "error bulk saving ledgers")
 	}
 	if len(txs) == 0 {
+		if err = pgTX.Commit(ctx); err != nil {
+			return 0, errors.Wrap(err, "error committing ledgers")
+		}
 		return 0, nil
 	}
 	if _, err = pgTX.Exec(ctx, tempTableQry); err != nil {
@@ -227,13 +231,13 @@ func (s Ledger) SaveWithoutTransactionsChecks(ctx context.Context, l ...pkg.Ledg
 		return 0, nil
 	}
 	var err error
-	pgTX, err := s.pool.Begin(ctx)
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, errors.Wrap(err, "error creating transaction")
 	}
 	defer func() {
-		if err != nil {
-			pgTX.Rollback(ctx)
+		if err := tx.Rollback(ctx); err != nil {
+			log.Print(err)
 		}
 	}()
 
@@ -254,7 +258,7 @@ func (s Ledger) SaveWithoutTransactionsChecks(ctx context.Context, l ...pkg.Ledg
 			now,
 		}, nil
 	})
-	if _, err = pgTX.CopyFrom(ctx, pgx.Identifier{s.ledgerTableName}, ledgerTableInsertCols, ledgerSrcFn); err != nil {
+	if _, err = tx.CopyFrom(ctx, pgx.Identifier{s.ledgerTableName}, ledgerTableInsertCols, ledgerSrcFn); err != nil {
 		return 0, errors.Wrap(err, "error bulk saving ledgers")
 	}
 	if len(txs) == 0 {
@@ -275,10 +279,10 @@ func (s Ledger) SaveWithoutTransactionsChecks(ctx context.Context, l ...pkg.Ledg
 			now,
 		}, nil
 	})
-	if _, err = pgTX.CopyFrom(ctx, pgx.Identifier{s.txsTableName}, txsTableInsertCols, cpyTxsFn); err != nil {
+	if _, err = tx.CopyFrom(ctx, pgx.Identifier{s.txsTableName}, txsTableInsertCols, cpyTxsFn); err != nil {
 		return 0, errors.Wrapf(err, "error bulk saving transactions in %s table", s.txsTableName)
 	}
-	if err = pgTX.Commit(ctx); err != nil {
+	if err = tx.Commit(ctx); err != nil {
 		return 0, errors.Wrap(err, "error committing transaction")
 	}
 	return len(txs), nil

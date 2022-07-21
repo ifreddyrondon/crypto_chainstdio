@@ -14,20 +14,23 @@ import (
 
 type worker struct {
 	f                  BlockchainFetcher
-	log                *zap.Logger
+	logger             *zap.Logger
 	retryAttempts      int
 	retrySleepDuration time.Duration
 	exponentialBackoff int
 }
 
 func (w *worker) work(ctx context.Context, wg *sync.WaitGroup, jobs <-chan []pkg.Identifier, results chan<- []pkg.Ledger, errCh chan<- error) {
-	defer wg.Done()
+	defer func() {
+		w.logger.Info("done")
+		wg.Done()
+	}()
 	for {
 		select {
 		case job, ok := <-jobs:
 			t0 := time.Now()
 			if !ok {
-				w.log.Debug("empty jobs, closing worker")
+				w.logger.Debug("empty jobs, closing worker")
 				return
 			}
 			var err error
@@ -35,7 +38,7 @@ func (w *worker) work(ctx context.Context, wg *sync.WaitGroup, jobs <-chan []pkg
 			sleep := w.retrySleepDuration
 			for i := 0; i < w.retryAttempts; i++ {
 				if i > 0 {
-					w.log.Debug("retrying after error", zap.Error(err))
+					w.logger.Debug("retrying after error", zap.Error(err))
 					time.Sleep(sleep)
 					sleep *= 2
 				}
@@ -52,13 +55,11 @@ func (w *worker) work(ctx context.Context, wg *sync.WaitGroup, jobs <-chan []pkg
 					errCh <- err
 					break
 				}
+				w.logger.Info("shutting down...")
 				return
 			}
-			w.log.Debug("fetching completed", zap.Int("amount", len(ledgers)), zap.Duration("duration", time.Since(t0)))
+			w.logger.Debug("fetching completed", zap.Int("amount", len(ledgers)), zap.Duration("duration", time.Since(t0)))
 			results <- ledgers
-		case <-ctx.Done():
-			w.log.Info("shutting down worker...")
-			return
 		}
 	}
 }

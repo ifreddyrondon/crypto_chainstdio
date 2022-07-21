@@ -81,7 +81,7 @@ func (m *Manager) WaitForInterrupt() {
 		close(m.shutdownCh)
 	})
 	<-m.shutdownCh
-	m.log.Info("shutting down added services...")
+	m.log.Info("shutting down services")
 	m.cancelFn()
 	// Wait for all services finish
 	m.servicesWg.Wait()
