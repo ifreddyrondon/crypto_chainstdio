@@ -47,7 +47,7 @@ func run() error {
 		return errors.Wrap(err, "error loading env vars")
 	}
 
-	log, err := zap.NewDevelopment()
+	logger, err := zap.NewDevelopment()
 	if err != nil {
 		return errors.Wrap(err, "error creating logger")
 	}
@@ -80,17 +80,18 @@ func run() error {
 		blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET, c),
 		blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET, c),
 	}
-	syncCollector := collecting.NewSync(log, ethClients)
-	syncStorer := storing.NewSync(log, ledgerStorage)
-	ledgerConciliator := conciliating.New(ledgerStorage, syncCollector, syncStorer, log)
+	syncCollector := collecting.NewSync(logger, ethClients)
+	syncStorer := storing.NewSync(logger, ledgerStorage)
+	ledgerConciliator := conciliating.New(ledgerStorage, syncCollector, syncStorer, logger)
 
-	asyncCollector := collecting.NewAsync(log, ethClients)
-	ledgerUpdater := updating.New(ledgerStorage, ethClient, asyncCollector, log)
-	sync := synchronizer.New(ledgerConciliator, ledgerUpdater, log)
-	mgr := manager.New(log)
+	asyncCollector := collecting.NewAsync(logger, ethClients)
+	asyncStorer := storing.NewAsync(logger, ledgerStorage)
+	ledgerUpdater := updating.New(ledgerStorage, ethClient, asyncCollector, asyncStorer, logger)
+	sync := synchronizer.New(ledgerConciliator, ledgerUpdater, logger)
+	mgr := manager.New(logger)
 	mgr.AddService(manager.ServiceFactory("synchronizer", sync.Run))
 	mgr.AddShutdownHook(func() {
-		log.Info("closing connection pool")
+		logger.Info("closing connection pool")
 		dbpool.Close()
 	})
 

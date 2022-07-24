@@ -21,21 +21,29 @@ type (
 		Collect() (chan<- []pkg.Identifier, <-chan []pkg.Ledger, <-chan error)
 		Close()
 	}
+	Storer interface {
+		Save() (chan<- []pkg.Ledger, <-chan error)
+		Close()
+	}
 )
 
 type Updater struct {
-	localFetcher      LocalFetcher
-	blockchainFetcher BlockchainFetcher
-	collector         Collector
-	logger            *zap.Logger
+	localFetcher       LocalFetcher
+	blockchainFetcher  BlockchainFetcher
+	collector          Collector
+	collectorBatchSize uint64
+	storer             Storer
+	logger             *zap.Logger
 }
 
-func New(localFetcher LocalFetcher, blockchainFetcher BlockchainFetcher, collector Collector, logger *zap.Logger) *Updater {
+func New(lFetcher LocalFetcher, bFetcher BlockchainFetcher, c Collector, s Storer, l *zap.Logger) *Updater {
 	return &Updater{
-		localFetcher:      localFetcher,
-		blockchainFetcher: blockchainFetcher,
-		collector:         collector,
-		logger:            logger.Named("updater"),
+		localFetcher:       lFetcher,
+		blockchainFetcher:  bFetcher,
+		collector:          c,
+		collectorBatchSize: 500,
+		storer:             s,
+		logger:             l.Named("updater"),
 	}
 }
 
@@ -51,6 +59,7 @@ func (u Updater) Update(ctx context.Context) error {
 	if err != nil {
 		return errors.Wrap(err, "error getting latest local ledger")
 	}
+	u.logger.Sugar().Infof("latest local ledger index %v", local.Identifier.Index)
 	onChain, err := u.blockchainFetcher.Latest(ctx)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -58,32 +67,44 @@ func (u Updater) Update(ctx context.Context) error {
 		}
 		return errors.Wrap(err, "error getting latest on chain ledger")
 	}
+	u.logger.Sugar().Infof("latest on-chain ledger index %v", onChain.Identifier.Index)
 	from := local.Identifier.Index + 1
-	toOnChain := onChain.Identifier.Index
-	if from == toOnChain {
+	to := onChain.Identifier.Index
+	if from == to {
 		return nil
 	}
-	jobsCh, resultCh, errCollectingCh := u.collector.Collect()
+	u.logger.Sugar().Infof("there are %v ledgers to update", onChain.Identifier.Index-local.Identifier.Index)
+	collectorJobCh, collectorResultCh, collectorErrCh := u.collector.Collect()
+	saverJobCh, saverErrCh := u.storer.Save()
 	var wg sync.WaitGroup
 	wg.Add(2)
 	// collecting
 	go func() {
 		defer func() {
-			close(jobsCh)
+			close(collectorJobCh)
 			wg.Done()
 		}()
-		for from < toOnChain {
-			// context cancelled time to close
-			if ctx.Err() != nil {
+		for from < to {
+			select {
+			case <-ctx.Done():
 				return
-			}
-			to := from + 5000
-			if to > toOnChain {
-				to = toOnChain
-			}
-			chunks := splitInterval(from, to, 500)
-			for _, chunk := range chunks {
-				jobsCh <- chunk
+			default:
+				openSpots := cap(collectorJobCh) - len(collectorJobCh)
+				// skip until get open spots
+				if openSpots == 0 {
+					continue
+				}
+				// only get the amount of open spots
+				total := u.collectorBatchSize * uint64(openSpots)
+				localTo := from + total
+				if localTo > to {
+					localTo = to
+				}
+				chunks := splitInterval(from, localTo, u.collectorBatchSize)
+				for _, chunk := range chunks {
+					collectorJobCh <- chunk
+				}
+				from += total
 			}
 		}
 	}()
@@ -94,11 +115,11 @@ func (u Updater) Update(ctx context.Context) error {
 			select {
 			case <-ctx.Done():
 				return
-			case result, ok := <-resultCh:
+			case result, ok := <-collectorResultCh:
 				if !ok {
 					return
 				}
-				_ = result
+				saverJobCh <- result
 			}
 		}
 	}()
@@ -110,12 +131,15 @@ func (u Updater) Update(ctx context.Context) error {
 	select {
 	case <-doneCh:
 		return nil
-	case err := <-errCollectingCh:
+	case err := <-collectorErrCh:
 		return errors.Wrap(err, "error collecting ledgers")
+	case err := <-saverErrCh:
+		return errors.Wrap(err, "error saving ledgers")
 	case <-ctx.Done():
 		u.logger.Info("shutting down...")
 		<-doneCh
 		u.collector.Close()
+		u.storer.Close()
 		return nil
 	}
 }

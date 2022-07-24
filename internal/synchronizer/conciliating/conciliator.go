@@ -17,7 +17,7 @@ type (
 		Collect(ctx context.Context, ids ...pkg.Identifier) ([]pkg.Ledger, error)
 	}
 	Storer interface {
-		Save(ctx context.Context, l ...pkg.Ledger) error
+		Save(ctx context.Context, l []pkg.Ledger) error
 	}
 )
 
@@ -80,7 +80,7 @@ func (c Conciliator) conciliate(ctx context.Context) error {
 	if len(ledgers) == 0 {
 		return errors.New("missing ledgers not found")
 	}
-	if err := c.storer.Save(ctx, ledgers...); err != nil {
+	if err := c.storer.Save(ctx, ledgers); err != nil {
 		return errors.Wrap(err, "error saving ledgers")
 	}
 	return nil

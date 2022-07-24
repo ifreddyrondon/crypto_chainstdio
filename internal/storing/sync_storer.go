@@ -12,7 +12,7 @@ import (
 
 type (
 	Storage interface {
-		Save(ctx context.Context, l ...pkg.Ledger) (int, error)
+		Save(ctx context.Context, checkTx bool, l []pkg.Ledger) (int, error)
 	}
 )
 
@@ -28,9 +28,9 @@ func NewSync(logger *zap.Logger, s Storage) *Sync {
 	}
 }
 
-func (s Sync) Save(ctx context.Context, l ...pkg.Ledger) error {
+func (s Sync) Save(ctx context.Context, l []pkg.Ledger) error {
 	t0 := time.Now()
-	txsAmount, err := s.s.Save(ctx, l...)
+	txsAmount, err := s.s.Save(ctx, true, l)
 	if err != nil {
 		return errors.Wrap(err, "error saving ledgers")
 	}

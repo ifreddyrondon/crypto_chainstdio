@@ -156,7 +156,7 @@ const tempTableQry = `CREATE TEMPORARY TABLE _temp_transactions (LIKE transactio
 // It's safe to call this method when there are missing transactions of a ledgers because
 // it validates the existence of previous transactions for a given ledger and
 // only store the missing ones. It's recommended to use when there are missing ledgers.
-func (s Ledger) Save(ctx context.Context, l ...pkg.Ledger) (int, error) {
+func (s Ledger) Save(ctx context.Context, checkTx bool, l []pkg.Ledger) (int, error) {
 	if len(l) == 0 {
 		return 0, nil
 	}
@@ -166,7 +166,7 @@ func (s Ledger) Save(ctx context.Context, l ...pkg.Ledger) (int, error) {
 		return 0, errors.Wrap(err, "error creating transaction")
 	}
 	defer func() {
-		if err := pgTX.Rollback(ctx); err != nil {
+		if err := pgTX.Rollback(ctx); err != nil && err != pgx.ErrTxClosed {
 			log.Print(err)
 		}
 	}()
@@ -196,93 +196,52 @@ func (s Ledger) Save(ctx context.Context, l ...pkg.Ledger) (int, error) {
 		}
 		return 0, nil
 	}
-	if _, err = pgTX.Exec(ctx, tempTableQry); err != nil {
-		return 0, errors.Wrap(err, "error creating _temp_transactions table")
-	}
-	cpyTxsFn := pgx.CopyFromSlice(len(txs), func(i int) ([]interface{}, error) {
-		now := time.Now().UTC()
-		return []interface{}{
-			s.blockchain,
-			s.network,
-			txs[i].Identifier.Hash,
-			txs[i].Identifier.Index,
-			txs[i].Ledger.Hash,
-			txs[i].Ledger.Index,
-			txs[i].From.Hash,
-			txs[i].To.Hash,
-			nil,
-			now,
-		}, nil
-	})
-	if _, err = pgTX.CopyFrom(ctx, pgx.Identifier{"_temp_transactions"}, txsTableInsertCols, cpyTxsFn); err != nil {
-		return 0, errors.Wrap(err, "error bulk saving transactions in _temp_transactions table")
-	}
-	if _, err = pgTX.Exec(ctx, s.upsertTxQry); err != nil {
-		return 0, errors.Wrap(err, "error upsetting transactions")
+	if checkTx {
+		if _, err = pgTX.Exec(ctx, tempTableQry); err != nil {
+			return 0, errors.Wrap(err, "error creating _temp_transactions table")
+		}
+		cpyTxsFn := pgx.CopyFromSlice(len(txs), func(i int) ([]interface{}, error) {
+			now := time.Now().UTC()
+			return []interface{}{
+				s.blockchain,
+				s.network,
+				txs[i].Identifier.Hash,
+				txs[i].Identifier.Index,
+				txs[i].Ledger.Hash,
+				txs[i].Ledger.Index,
+				txs[i].From.Hash,
+				txs[i].To.Hash,
+				nil,
+				now,
+			}, nil
+		})
+		if _, err = pgTX.CopyFrom(ctx, pgx.Identifier{"_temp_transactions"}, txsTableInsertCols, cpyTxsFn); err != nil {
+			return 0, errors.Wrap(err, "error bulk saving transactions in _temp_transactions table")
+		}
+		if _, err = pgTX.Exec(ctx, s.upsertTxQry); err != nil {
+			return 0, errors.Wrap(err, "error upsetting transactions")
+		}
+	} else {
+		cpyTxsFn := pgx.CopyFromSlice(len(txs), func(i int) ([]interface{}, error) {
+			now := time.Now().UTC()
+			return []interface{}{
+				s.blockchain,
+				s.network,
+				txs[i].Identifier.Hash,
+				txs[i].Identifier.Index,
+				txs[i].Ledger.Hash,
+				txs[i].Ledger.Index,
+				txs[i].From.Hash,
+				txs[i].To.Hash,
+				nil,
+				now,
+			}, nil
+		})
+		if _, err = pgTX.CopyFrom(ctx, pgx.Identifier{s.txsTableName}, txsTableInsertCols, cpyTxsFn); err != nil {
+			return 0, errors.Wrapf(err, "error bulk saving transactions in %s table", s.txsTableName)
+		}
 	}
 	if err = pgTX.Commit(ctx); err != nil {
-		return 0, errors.Wrap(err, "error committing transaction")
-	}
-	return len(txs), nil
-}
-
-func (s Ledger) SaveWithoutTransactionsChecks(ctx context.Context, l ...pkg.Ledger) (int, error) {
-	if len(l) == 0 {
-		return 0, nil
-	}
-	var err error
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return 0, errors.Wrap(err, "error creating transaction")
-	}
-	defer func() {
-		if err := tx.Rollback(ctx); err != nil {
-			log.Print(err)
-		}
-	}()
-
-	var txs []pkg.Transaction
-	ledgerSrcFn := pgx.CopyFromSlice(len(l), func(i int) ([]interface{}, error) {
-		txs = append(txs, l[i].Transactions...)
-		now := time.Now().UTC()
-		return []interface{}{
-			s.blockchain,
-			s.network,
-			l[i].Identifier.Hash,
-			l[i].Identifier.Index,
-			l[i].PreviousLedger.Hash,
-			l[i].PreviousLedger.Index,
-			l[i].Orphaned,
-			l[i].Timestamp,
-			l[i].Metadata,
-			now,
-		}, nil
-	})
-	if _, err = tx.CopyFrom(ctx, pgx.Identifier{s.ledgerTableName}, ledgerTableInsertCols, ledgerSrcFn); err != nil {
-		return 0, errors.Wrap(err, "error bulk saving ledgers")
-	}
-	if len(txs) == 0 {
-		return 0, nil
-	}
-	cpyTxsFn := pgx.CopyFromSlice(len(txs), func(i int) ([]interface{}, error) {
-		now := time.Now().UTC()
-		return []interface{}{
-			s.blockchain,
-			s.network,
-			txs[i].Identifier.Hash,
-			txs[i].Identifier.Index,
-			txs[i].Ledger.Hash,
-			txs[i].Ledger.Index,
-			txs[i].From.Hash,
-			txs[i].To.Hash,
-			nil,
-			now,
-		}, nil
-	})
-	if _, err = tx.CopyFrom(ctx, pgx.Identifier{s.txsTableName}, txsTableInsertCols, cpyTxsFn); err != nil {
-		return 0, errors.Wrapf(err, "error bulk saving transactions in %s table", s.txsTableName)
-	}
-	if err = tx.Commit(ctx); err != nil {
 		return 0, errors.Wrap(err, "error committing transaction")
 	}
 	return len(txs), nil
