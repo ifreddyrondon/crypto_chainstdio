@@ -12,10 +12,10 @@ import (
 
 type (
 	LocalFetcher interface {
-		Latest(ctx context.Context) (pkg.Ledger, error)
+		Highest(ctx context.Context) (uint64, error)
 	}
 	BlockchainFetcher interface {
-		Latest(ctx context.Context) (pkg.Ledger, error)
+		Highest(ctx context.Context) (pkg.Ledger, error)
 	}
 	Collector interface {
 		Collect() (chan<- []pkg.Identifier, <-chan []pkg.Ledger, <-chan error)
@@ -55,12 +55,12 @@ func (u Updater) Update(ctx context.Context) error {
 		u.logger.Info("done")
 	}()
 	u.logger.Info("getting latest ledgers local and on chain")
-	local, err := u.localFetcher.Latest(ctx)
+	localID, err := u.localFetcher.Highest(ctx)
 	if err != nil {
 		return errors.Wrap(err, "error getting latest local ledger")
 	}
-	u.logger.Sugar().Infof("latest local ledger index %v", local.Identifier.Index)
-	onChain, err := u.blockchainFetcher.Latest(ctx)
+	u.logger.Sugar().Infof("latest local ledger index %v", localID)
+	onChain, err := u.blockchainFetcher.Highest(ctx)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			return nil
@@ -68,12 +68,12 @@ func (u Updater) Update(ctx context.Context) error {
 		return errors.Wrap(err, "error getting latest on chain ledger")
 	}
 	u.logger.Sugar().Infof("latest on-chain ledger index %v", onChain.Identifier.Index)
-	from := local.Identifier.Index + 1
+	from := localID + 1
 	to := onChain.Identifier.Index
 	if from == to {
 		return nil
 	}
-	u.logger.Sugar().Infof("there are %v ledgers to update", onChain.Identifier.Index-local.Identifier.Index)
+	u.logger.Sugar().Infof("there are %v ledgers to update", to-from)
 	collectorJobCh, collectorResultCh, collectorErrCh := u.collector.Collect()
 	saverJobCh, saverErrCh := u.storer.Save()
 	var wg sync.WaitGroup

@@ -26,5 +26,5 @@ CREATE INDEX idx_transaction_ledger_hsh on transactions (ledger_hash);
 
 -- +goose Down
 -- +goose StatementBegin
-SELECT 'down SQL query';
+DROP TABLE transactions;
 -- +goose StatementEnd

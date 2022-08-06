@@ -6,6 +6,15 @@ import (
 
 type Blockchain int32
 
+func (b Blockchain) String() string {
+	return blockchainMapper[int32(b)]
+}
+
+var blockchainMapper = map[int32]string{
+	0: "UNKNOWN",
+	1: "ETHEREUM",
+}
+
 const (
 	Blockchain_UNKNOWN  Blockchain = 0
 	Blockchain_ETHEREUM Blockchain = 1
@@ -14,9 +23,18 @@ const (
 type Network int32
 
 const (
-	Network_UNKNOWN          Network = 0
-	Network_ETHEREUM_MAINNET         = 1
+	Network_UNKNOWN Network = 0
+	Network_MAINNET         = 1
 )
+
+func (b Network) String() string {
+	return networkMapper[int32(b)]
+}
+
+var networkMapper = map[int32]string{
+	0: "UNKNOWN",
+	1: "MAINNET",
+}
 
 // Identifier represents a generic struct of identifying properties
 type Identifier struct {
@@ -57,9 +75,18 @@ type Transaction struct {
 	// Identifier of the ledger this transaction resides in
 	Ledger Identifier
 	// From represent the sending party of the transaction
-	From Identifier
+	From string
 	// To represent the receiving party of the transaction
-	To        Identifier
+	To        string
 	Metadata  interface{}
 	CreatedAt time.Time
+}
+
+// SyncTX represents a simplified version of ledger transaction
+// This struct is used for sync a blockchain locally without all the information
+type SyncTX struct {
+	// Identifier of the ledger this transaction resides in
+	Ledger Identifier
+	// Address represent the sending or receiving party of the transaction
+	Address string
 }

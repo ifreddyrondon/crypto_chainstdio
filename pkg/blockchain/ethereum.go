@@ -119,8 +119,8 @@ func NewEthereum(nodesURL string, network pkg.Network, c *http.Client) Ethereum 
 	}
 }
 
-// Latest fetches the tip block
-func (e Ethereum) Latest(ctx context.Context) (pkg.Ledger, error) {
+// Highest fetches the tip block
+func (e Ethereum) Highest(ctx context.Context) (pkg.Ledger, error) {
 	jsonreq := jsonrpc.Request{
 		Method: string(ethGetChainStatsMethods),
 		Params: []interface{}{},
@@ -194,7 +194,7 @@ func (e Ethereum) Ledgers(ctx context.Context, ids ...pkg.Identifier) ([]pkg.Led
 			return nil, fmt.Errorf("error parsing block to ledger. %w", err)
 		}
 		l.Network = e.network
-		txs, err := e.transactionsFromBlock(ctx, b.Transactions)
+		txs, err := e.transactionsFromBlock(b.Transactions)
 		if err != nil {
 			return nil, fmt.Errorf("error getting transactions from block. %w", err)
 		}
@@ -204,7 +204,7 @@ func (e Ethereum) Ledgers(ctx context.Context, ids ...pkg.Identifier) ([]pkg.Led
 	return result, nil
 }
 
-func (e Ethereum) transactionsFromBlock(ctx context.Context, transactions []EthereumTransaction) ([]pkg.Transaction, error) {
+func (e Ethereum) transactionsFromBlock(transactions []EthereumTransaction) ([]pkg.Transaction, error) {
 	txs := make([]pkg.Transaction, 0)
 	if len(transactions) == 0 {
 		return txs, nil
@@ -237,8 +237,8 @@ func (e Ethereum) transactionsFromBlock(ctx context.Context, transactions []Ethe
 				Hash:  string(tx.BlockHash),
 				Index: blockNumber,
 			},
-			From: pkg.Identifier{Hash: string(tx.From)},
-			To:   pkg.Identifier{Hash: string(tx.To)},
+			From: string(tx.From),
+			To:   string(tx.To),
 		}
 		txs = append(txs, t)
 	}

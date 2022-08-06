@@ -54,18 +54,12 @@ func run() error {
 
 	ctx := context.Background()
 	dbURI := fmt.Sprintf("postgres://%s:%s@%s/%s", cfg.DBUser, cfg.DBPass, cfg.DBHost, cfg.DBName)
-	dbpool, err := connPool(ctx, dbURI, cfg.DBMaxConnections)
+	dbPool, err := connPool(ctx, dbURI, cfg.DBMaxConnections)
 	if err != nil {
 		return errors.Wrap(err, "error creating DB connection pool")
 	}
 
-	ledgerStorage, err := storage.NewLedger(
-		dbpool,
-		pkg.Blockchain_ETHEREUM,
-		pkg.Network_ETHEREUM_MAINNET,
-		"ledgers",
-		"transactions",
-	)
+	ledgerStorage, err := storage.NewSyncTX(dbPool, pkg.Blockchain_ETHEREUM, pkg.Network_MAINNET)
 	if err != nil {
 		return errors.Wrap(err, "error creating ledger storage")
 	}
@@ -73,12 +67,12 @@ func run() error {
 		MaxIdleConns:        20,
 		MaxIdleConnsPerHost: 20,
 	}}
-	ethClient := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET, c)
+	ethClient := blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_MAINNET, c)
 	ethClients := []collecting.BlockchainFetcher{
 		ethClient,
-		blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET, c),
-		blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET, c),
-		blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_ETHEREUM_MAINNET, c),
+		blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_MAINNET, c),
+		blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_MAINNET, c),
+		blockchain.NewEthereum(cfg.EthereumNodesURL, pkg.Network_MAINNET, c),
 	}
 	syncCollector := collecting.NewSync(logger, ethClients)
 	syncStorer := storing.NewSync(logger, ledgerStorage)
@@ -92,7 +86,7 @@ func run() error {
 	mgr.AddService(manager.ServiceFactory("synchronizer", sync.Run))
 	mgr.AddShutdownHook(func() {
 		logger.Info("closing connection pool")
-		dbpool.Close()
+		dbPool.Close()
 	})
 
 	mgr.WaitForInterrupt()
