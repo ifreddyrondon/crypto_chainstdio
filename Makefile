@@ -44,3 +44,8 @@ docker-stop:
 .PHONY: run
 run:
 	go vet ./cmd/sync/ && go run ./cmd/sync/
+
+# test
+.PHONY: test
+test:
+	go test -race -count=1 ./...
